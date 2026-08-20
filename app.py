@@ -3,12 +3,84 @@ import streamlit.components.v1 as components
 import os
 import time
 import glob
-from gtts import gTTS
+import math
+import struct
+import wave
 from PIL import Image
 import base64
  
-st.title("Conversión de Texto a Audio")
-image = Image.open('gato_raton.jpg')
+st.title("Conversión de Texto a Código Morse (Audio)")
+ 
+# ---------------------------------------------------------------------------
+# Tabla de código Morse
+# ---------------------------------------------------------------------------
+MORSE_CODE = {
+    'A': '.-', 'B': '-...', 'C': '-.-.', 'D': '-..', 'E': '.', 'F': '..-.',
+    'G': '--.', 'H': '....', 'I': '..', 'J': '.---', 'K': '-.-', 'L': '.-..',
+    'M': '--', 'N': '-.', 'O': '---', 'P': '.--.', 'Q': '--.-', 'R': '.-.',
+    'S': '...', 'T': '-', 'U': '..-', 'V': '...-', 'W': '.--', 'X': '-..-',
+    'Y': '-.--', 'Z': '--..',
+    '0': '-----', '1': '.----', '2': '..---', '3': '...--', '4': '....-',
+    '5': '.....', '6': '-....', '7': '--...', '8': '---..', '9': '----.',
+    'Ñ': '--.--', 'Á': '.--.-', 'É': '..-..', 'Í': '..', 'Ó': '---.', 'Ú': '..--',
+    '.': '.-.-.-', ',': '--..--', '?': '..--..', "'": '.----.', '!': '-.-.--',
+    '/': '-..-.', '(': '-.--.', ')': '-.--.-', '&': '.-...', ':': '---...',
+    ';': '-.-.-.', '=': '-...-', '+': '.-.-.', '-': '-....-', '_': '..--.-',
+    '"': '.-..-.', '@': '.--.-.', '¡': '--...-', '¿': '..-.-',
+}
+ 
+ 
+def text_to_morse(text):
+    """Convierte texto en su representación de código Morse (solo texto)."""
+    text = text.upper()
+    words = text.split(' ')
+    morse_words = []
+    for word in words:
+        codes = [MORSE_CODE[ch] for ch in word if ch in MORSE_CODE]
+        morse_words.append(' '.join(codes))
+    return ' / '.join(w for w in morse_words if w)
+ 
+ 
+def morse_to_wav(text, filename, freq=700, wpm=18, sample_rate=44100):
+    """Genera un archivo .wav con los pitidos (beeps) del código Morse
+    correspondientes al texto dado, y devuelve la representación en texto."""
+    text = text.upper()
+    unit = 1.2 / wpm  # duración de un "punto", estándar PARIS
+ 
+    frames = bytearray()
+ 
+    def add_tone(duration):
+        n_samples = int(sample_rate * duration)
+        for i in range(n_samples):
+            value = int(32767 * 0.5 * math.sin(2 * math.pi * freq * i / sample_rate))
+            frames.extend(struct.pack('<h', value))
+ 
+    def add_silence(duration):
+        n_samples = int(sample_rate * duration)
+        frames.extend(b'\x00\x00' * n_samples)
+ 
+    morse_words = []
+    words = text.split(' ')
+    for wi, word in enumerate(words):
+        letter_codes = [MORSE_CODE[ch] for ch in word if ch in MORSE_CODE]
+        for code in letter_codes:
+            for si, symbol in enumerate(code):
+                add_tone(unit if symbol == '.' else unit * 3)
+                if si < len(code) - 1:
+                    add_silence(unit)  # espacio entre símbolos de una letra
+            add_silence(unit * 3)  # espacio entre letras
+        morse_words.append(' '.join(letter_codes))
+        if wi < len(words) - 1 and letter_codes:
+            add_silence(unit * 7 - unit * 3)  # completar espacio entre palabras
+ 
+    with wave.open(filename, 'wb') as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(bytes(frames))
+ 
+    return ' / '.join(w for w in morse_words if w)
+image = Image.open('gato_raton.png')
 st.image(image, width=350)
 with st.sidebar:
     st.subheader("Esrcibe y/o selecciona texto para ser escuchado.")
@@ -26,57 +98,43 @@ st.write('¡Ay! -dijo el ratón-. El mundo se hace cada día más pequeño. Al p
  
         )
  
-st.markdown(f"Quieres escucharlo?, copia el texto")
-text = st.text_area("Ingrese El texto a escuchar.")
-tld = 'com'
-option_lang = st.selectbox(
-    "Selecciona el lenguaje",
-    ("Español", "English"))
-if option_lang == "Español":
-    lg = 'es'
-if option_lang == "English":
-    lg = 'en'
- 
- 
-def text_to_speech(text, tld, lg):
- 
-    tts = gTTS(text, lang=lg)  # tts = gTTS(text,'en', tld, slow=False)
-    try:
-        my_file_name = text[0:20]
-    except:
-        my_file_name = "audio"
-    tts.save(f"temp/{my_file_name}.mp3")
-    return my_file_name, text
- 
+st.markdown(f"Quieres escucharlo en código Morse?, copia el texto")
+text = st.text_area("Ingrese El texto a convertir.")
  
 # display_output_text = st.checkbox("Verifica el texto")
-if st.button("convertir a Audio"):
-    result, output_text = text_to_speech(text, 'com', lg)  # 'tld
-    audio_file = open(f"temp/{result}.mp3", "rb")
-    audio_bytes = audio_file.read()
-    st.markdown(f"## Tú audio:")
-    st.audio(audio_bytes, format="audio/mp3", start_time=0)
-    # if display_output_text:
+if st.button("convertir a Código Morse (Audio)"):
+    if not text.strip():
+        st.warning("Por favor ingresa algún texto.")
+    else:
+        safe_name = "".join(c if c.isalnum() else "_" for c in text[:20]).strip("_") or "audio"
+        filename = f"temp/{safe_name}.wav"
+        morse_text = morse_to_wav(text, filename)
  
-    # st.write(f" {output_text}")
+        audio_file = open(filename, "rb")
+        audio_bytes = audio_file.read()
+        st.markdown(f"## Tu audio en Código Morse:")
+        st.audio(audio_bytes, format="audio/wav", start_time=0)
  
-    with open(f"temp/{result}.mp3", "rb") as f:
-        data = f.read()
+        st.markdown("**Código Morse:**")
+        st.code(morse_text if morse_text else "(no se encontraron caracteres convertibles)")
  
-    def get_binary_file_downloader_html(bin_file, file_label='File'):
-        bin_str = base64.b64encode(data).decode()
-        href = f'<a href="data:application/octet-stream;base64,{bin_str}" download="{os.path.basename(bin_file)}">Download {file_label}</a>'
-        return href
+        with open(filename, "rb") as f:
+            data = f.read()
  
-    st.markdown(get_binary_file_downloader_html("audio.mp3", file_label="Audio File"), unsafe_allow_html=True)
+        def get_binary_file_downloader_html(bin_file, file_label='File'):
+            bin_str = base64.b64encode(data).decode()
+            href = f'<a href="data:application/octet-stream;base64,{bin_str}" download="{os.path.basename(bin_file)}">Download {file_label}</a>'
+            return href
+ 
+        st.markdown(get_binary_file_downloader_html(filename, file_label="Audio File (.wav)"), unsafe_allow_html=True)
  
  
 def remove_files(n):
-    mp3_files = glob.glob("temp/*mp3")
-    if len(mp3_files) != 0:
+    audio_files = glob.glob("temp/*mp3") + glob.glob("temp/*wav")
+    if len(audio_files) != 0:
         now = time.time()
         n_days = n * 86400
-        for f in mp3_files:
+        for f in audio_files:
             if os.stat(f).st_mtime < now - n_days:
                 os.remove(f)
                 print("Deleted ", f)
